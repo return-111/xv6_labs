@@ -34,12 +34,12 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc));
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      // p->kstack = va;
   }
   kvminithart();
 }
@@ -115,12 +115,18 @@ found:
 
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
-  if(p->pagetable == 0){
+  p -> kernel_pagetable = proc_kernel_pagetable();
+  if(p->pagetable == 0 || p -> kernel_pagetable == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
   }
-
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  uvmmap(p->kernel_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -141,6 +147,9 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  uvmunmap(p->kernel_pagetable, p->kstack, 1, 1);
+  if (p -> kernel_pagetable)
+    free_kernelpgtbl(p -> kernel_pagetable, 0);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -220,6 +229,7 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
+  u2kmerge(p->pagetable, p->kernel_pagetable, 0, p->sz);
 
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
@@ -243,12 +253,14 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if(sz + n >= PLIC || (sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
+  
+  u2kmerge(p->pagetable, p->kernel_pagetable, p->sz, sz);
   p->sz = sz;
   return 0;
 }
@@ -274,6 +286,8 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  u2kmerge(np->pagetable, np->kernel_pagetable, 0, np->sz);
 
   np->parent = p;
 
@@ -473,8 +487,12 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        // printf("1");
+        w_satp(MAKE_SATP(p -> kernel_pagetable));
+        sfence_vma();
+        
         swtch(&c->context, &p->context);
-
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
