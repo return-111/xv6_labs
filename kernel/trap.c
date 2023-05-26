@@ -67,6 +67,31 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (r_scause() == 13 || r_scause() == 15) {
+    uint64 va = r_stval();
+    if (va > p->sz) {
+      p->killed = 1;
+      goto ret;
+    }
+    pte_t *pte;
+    if ((pte = walk(p->pagetable, va, 0)) != 0) {
+      if ((*pte & PTE_V) != 0 && (*pte & PTE_U) == 0) {
+        p->killed = 1;
+        goto ret;
+      }
+    }
+    va = PGROUNDDOWN(va);
+    char *mem = kalloc();
+    if (mem == 0){
+      p->killed = 1;
+      goto ret;
+    } else {
+      memset(mem, 0, PGSIZE);
+      if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        kfree(mem);
+        panic("usertrap: mappages error");
+      }
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -79,7 +104,7 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
-
+  ret:
   usertrapret();
 }
 
