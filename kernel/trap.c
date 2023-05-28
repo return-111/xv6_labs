@@ -11,6 +11,7 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -67,12 +68,51 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (r_scause() == 15) {
+    uint64 va = r_stval();
+    if (va > p->sz) {
+      p->killed = 1;
+      goto ret;
+    }
+    pte_t *pte;
+    if ((pte = walk(p->pagetable, va, 0)) != 0) {
+      if ((*pte & PTE_V) != 0 && (*pte & PTE_U) == 0) {
+        p->killed = 1;
+        goto ret;
+      }
+    }else panic("usertrap: pte should exist");
+    if ((*pte & PTE_C) == 0) {
+      panic("usertrap: not cow");
+    }
+    uint64 pa = PTE2PA(*pte);
+    if (accref(pa) == 1) {
+      *pte |= PTE_W;
+      *pte &= (~PTE_C);
+      goto ret;
+    }
+    if (accref(pa) == 0) {
+      panic("free error");
+    }
+    va = PGROUNDDOWN(va);
+    char *mem = kalloc();
+    if (mem == 0){
+      p->killed = 1;
+      goto ret;
+    } else {
+      memmove(mem, (char *)pa, PGSIZE);
+      uvmunmap(p->pagetable, va, 1, 1);
+      // subref(pa);
+      if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        kfree(mem);
+        panic("usertrap: mappages error");
+      }
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+ret:
   if(p->killed)
     exit(-1);
 
