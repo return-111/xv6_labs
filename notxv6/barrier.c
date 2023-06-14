@@ -31,6 +31,36 @@ barrier()
   // then increment bstate.round.
   //
   
+  // pthread_mutex_lock(&bstate.barrier_mutex);
+
+  pthread_mutex_lock(&bstate.barrier_mutex);
+  int oldround = bstate.round;
+  bstate.nthread++;
+  if (bstate.nthread == nthread) {
+    bstate.round++;
+  }
+  while (bstate.round != oldround + 1) {
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  }
+  // printf("%d : 1\n", oldround);
+  pthread_mutex_unlock(&bstate.barrier_mutex);
+  pthread_cond_broadcast(&bstate.barrier_cond);
+
+  // pthread_mutex_lock(&bstate.barrier_mutex);
+  // while (bstate.nthread != 0) {
+  //   pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  // }
+  // pthread_mutex_unlock(&bstate.barrier_mutex);
+  pthread_mutex_lock(&bstate.barrier_mutex);
+  bstate.nthread--;
+  if (bstate.nthread == 0) {
+    round++;
+  }
+  while (round != oldround + 1)
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  // printf("%d : 2 %d\n", oldround, bstate.nthread);
+  pthread_mutex_unlock(&bstate.barrier_mutex);
+  pthread_cond_broadcast(&bstate.barrier_cond);
 }
 
 static void *
