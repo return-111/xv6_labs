@@ -91,7 +91,6 @@ bget(uint dev, uint blockno)
   acquire(&bcache.bucketlock[buckid]);
   for (b = bcache.bucket[buckid].next; b != &bcache.bucket[buckid]; b = b->next) {
     if (b->dev == dev && b->blockno == blockno) {
-      if (b->refcnt == 0) b->valid = 0;
       b->refcnt++;
       b->usetick = ticks;
       release(&bcache.bucketlock[buckid]);
@@ -118,7 +117,6 @@ bget(uint dev, uint blockno)
 
   for (b = bcache.bucket[buckid].next; b != &bcache.bucket[buckid]; b = b->next) {
     if (b->dev == dev && b->blockno == blockno) {
-      if (b->refcnt == 0) b->valid = 0;
       b->refcnt++;
       b->usetick = ticks;
       release(&bcache.bucketlock[buckid]);
